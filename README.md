@@ -1,4 +1,4 @@
-# Plugin-WebpackTemplate
+# SillyTavern-PostgreSQL
 
 Template repository for server plugins using TypeScript and Webpack.
 
