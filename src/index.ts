@@ -1,5 +1,6 @@
 import bodyParser from 'body-parser';
 import { Router } from 'express';
+import { Chalk } from 'chalk';
 import { Client, QueryResult } from 'pg';
 
 interface DatabaseConfig {
@@ -9,6 +10,21 @@ interface DatabaseConfig {
     password: string;
     port: number;
 }
+
+interface PluginInfo {
+    id: string;
+    name: string;
+    description: string;
+}
+
+interface Plugin {
+    init: (router: Router) => Promise<void>;
+    exit: () => Promise<void>;
+    info: PluginInfo;
+}
+
+const chalk = new Chalk();
+const MODULE_NAME = '[SillyTavern-PostgreSQL]';
 
 // Set up a PostgreSQL Client
 const config: DatabaseConfig & { ssl: any } = {
@@ -95,13 +111,48 @@ async function sql_closeConnection(): Promise<void> {
     }
 }
 
-sql_connect();
+/**
+ * Initialize the plugin.
+ * @param router Express Router
+ */
+export async function init(router: Router): Promise<void> {
+    const jsonParser = bodyParser.json();
+    sql_connect();
+    // Used to check if the server plugin is running
+    router.post('/probe', (_req, res) => {
+        return res.sendStatus(204);
+    });
+    router.post('/sql_query', jsonParser, async (req, res) => {
+        try {
+            const query = req.body.query;
+            const result = await sql_query(query, []);
+            return res.json(result.rows);
+        } catch (error) {
+            console.error(chalk.red(MODULE_NAME), 'Request failed', error);
+            return res.status(500).send('Internal Server Error');
+        }
+    });
 
-export default {
-    sql_query,
-    sql_listTables,
-    sql_getDataFromTable,
-    sql_closeConnection,
+    console.log(chalk.green(MODULE_NAME), 'Plugin loaded!');
+}
+
+export async function exit(): Promise<void> {
+    sql_closeConnection();
+    console.log(chalk.yellow(MODULE_NAME), 'Plugin exited');
+}
+
+export const info: PluginInfo = {
+    id: 'postgresql',
+    name: 'PostgreSQL Plugin',
+    description: 'A simple example plugin for SillyTavern server.',
 };
+
+const plugin: Plugin = {
+    init,
+    exit,
+    info,
+};
+
+export default plugin;
 
 
