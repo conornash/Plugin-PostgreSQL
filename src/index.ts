@@ -63,6 +63,7 @@ async function sql_connect(): Promise<void> {
 */
 async function sql_query(text: string, params: any[]): Promise<QueryResult> {
     try {
+        console.log(chalk.green(MODULE_NAME), text);
         const start = Date.now();
         const res = await client.query(text, params);
         const duration = Date.now() - start;
