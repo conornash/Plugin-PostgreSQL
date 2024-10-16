@@ -1,7 +1,7 @@
 import bodyParser from 'body-parser';
 import { Router } from 'express';
 import { Chalk } from 'chalk';
-import { Client, QueryResult } from 'pg';
+import { Pool, QueryResult } from 'pg';
 
 interface DatabaseConfig {
     user: string;
@@ -38,7 +38,7 @@ const config: DatabaseConfig & { ssl: any } = {
     }
 }
 
-const client = new Client(config);
+const pool = new Pool(config);
 
 /**
 *Connects to the PostgreSQL database.
@@ -46,11 +46,17 @@ const client = new Client(config);
 */
 async function sql_connect(): Promise<void> {
     try {
-        await client.connect();
+        const client = await pool.connect();
         console.log('Database connection established');
+        client.release();  // Release the client back to the pool
     } catch (err) {
-        const error = err as Error;
-        console.error('Database connection error', error.stack);
+        const error = err as Error & { code?: string };
+        console.error('Database connection error:', error.message, error.stack);
+
+        if (error.code === 'ETIMEDOUT') {
+            console.log('Database connection timeout');
+        }
+
         throw error;
     }
 }
@@ -62,6 +68,7 @@ async function sql_connect(): Promise<void> {
 *@returns {Promise<QueryResult>} - The result of the query
 */
 async function sql_query(text: string, params: any[]): Promise<QueryResult> {
+    const client = await pool.connect();
     try {
         console.log(chalk.green(MODULE_NAME), text);
         const start = Date.now();
@@ -70,9 +77,11 @@ async function sql_query(text: string, params: any[]): Promise<QueryResult> {
         console.log('Executed query', { text, duration, rows: res.rowCount });
         return res;
     } catch (err) {
-        const error = err as Error;
+        const error = err as Error & { code?: string };
         console.error('Query error', error.message, error.stack);
         throw error;
+    } finally {
+        client.release();
     }
 }
 
@@ -98,16 +107,16 @@ async function sql_getDataFromTable(tableName: string, columns: string[]): Promi
 }
 
 /**
-*Closes the database connection.
-* @returns {Promise<void>}
+*Closes all database connections managed by the pool.*
+*@returns {Promise<void>} A promise that resolves when all connections have been closed.*
 */
 async function sql_closeConnection(): Promise<void> {
     try {
-        await client.end();
-        console.log('Database connection closed');
+        await pool.end();
+        console.log('All database connections have been closed.');
     } catch (err) {
         const error = err as Error;
-        console.error('Error closing connection', error.stack);
+        console.error('Error closing database connections:', error.message, error.stack);
         throw error;
     }
 }
@@ -118,13 +127,13 @@ async function sql_closeConnection(): Promise<void> {
  */
 export async function init(router: Router): Promise<void> {
     const jsonParser = bodyParser.json();
-    sql_connect();
     // Used to check if the server plugin is running
     router.post('/probe', (_req, res) => {
         return res.sendStatus(204);
     });
     router.post('/sql_query', jsonParser, async (req, res) => {
         try {
+            sql_connect();
             const query = req.body.query;
             const result = await sql_query(query, []);
             return res.json(result.rows);
@@ -155,5 +164,3 @@ const plugin: Plugin = {
 };
 
 export default plugin;
-
-

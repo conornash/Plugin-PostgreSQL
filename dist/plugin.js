@@ -18451,7 +18451,7 @@ const config = {
         rejectUnauthorized: false
     }
 };
-const client = new pg_1.Client(config);
+const pool = new pg_1.Pool(config);
 /**
 *Connects to the PostgreSQL database.
 *@returns {Promise<void>}
@@ -18459,12 +18459,16 @@ const client = new pg_1.Client(config);
 function sql_connect() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            yield client.connect();
+            const client = yield pool.connect();
             console.log('Database connection established');
+            client.release(); // Release the client back to the pool
         }
         catch (err) {
             const error = err;
-            console.error('Database connection error', error.stack);
+            console.error('Database connection error:', error.message, error.stack);
+            if (error.code === 'ETIMEDOUT') {
+                console.log('Database connection timeout');
+            }
             throw error;
         }
     });
@@ -18477,6 +18481,7 @@ function sql_connect() {
 */
 function sql_query(text, params) {
     return __awaiter(this, void 0, void 0, function* () {
+        const client = yield pool.connect();
         try {
             console.log(chalk.green(MODULE_NAME), text);
             const start = Date.now();
@@ -18489,6 +18494,9 @@ function sql_query(text, params) {
             const error = err;
             console.error('Query error', error.message, error.stack);
             throw error;
+        }
+        finally {
+            client.release();
         }
     });
 }
@@ -18516,18 +18524,18 @@ function sql_getDataFromTable(tableName, columns) {
     });
 }
 /**
-*Closes the database connection.
-* @returns {Promise<void>}
+*Closes all database connections managed by the pool.*
+*@returns {Promise<void>} A promise that resolves when all connections have been closed.*
 */
 function sql_closeConnection() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            yield client.end();
-            console.log('Database connection closed');
+            yield pool.end();
+            console.log('All database connections have been closed.');
         }
         catch (err) {
             const error = err;
-            console.error('Error closing connection', error.stack);
+            console.error('Error closing database connections:', error.message, error.stack);
             throw error;
         }
     });
@@ -18539,13 +18547,13 @@ function sql_closeConnection() {
 function init(router) {
     return __awaiter(this, void 0, void 0, function* () {
         const jsonParser = body_parser_1.default.json();
-        sql_connect();
         // Used to check if the server plugin is running
         router.post('/probe', (_req, res) => {
             return res.sendStatus(204);
         });
         router.post('/sql_query', jsonParser, (req, res) => __awaiter(this, void 0, void 0, function* () {
             try {
+                sql_connect();
                 const query = req.body.query;
                 const result = yield sql_query(query, []);
                 return res.json(result.rows);
