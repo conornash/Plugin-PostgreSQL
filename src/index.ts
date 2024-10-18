@@ -9,6 +9,7 @@ interface DatabaseConfig {
     database: string;
     password: string;
     port: number;
+    max: number;
 }
 
 interface PluginInfo {
@@ -33,6 +34,7 @@ const config: DatabaseConfig & { ssl: any } = {
     database: String(process.env.SQL_DATABASE),
     password: String(process.env.SQL_PASSWORD),
     port: Number(process.env.SQL_PORT),
+    max: 3,
     ssl: {
         rejectUnauthorized: false
     }

@@ -18447,6 +18447,7 @@ const config = {
     database: String(process.env.SQL_DATABASE),
     password: String(process.env.SQL_PASSWORD),
     port: Number(process.env.SQL_PORT),
+    max: 3,
     ssl: {
         rejectUnauthorized: false
     }
