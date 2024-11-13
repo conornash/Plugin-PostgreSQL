@@ -57,9 +57,9 @@ async function sql_connect(): Promise<void> {
 
         if (error.code === 'ETIMEDOUT') {
             console.log('Database connection timeout');
+        } else {
+            throw error;
         }
-
-        throw error;
     }
 }
 

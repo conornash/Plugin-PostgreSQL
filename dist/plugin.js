@@ -18470,7 +18470,9 @@ function sql_connect() {
             if (error.code === 'ETIMEDOUT') {
                 console.log('Database connection timeout');
             }
-            throw error;
+            else {
+                throw error;
+            }
         }
     });
 }
