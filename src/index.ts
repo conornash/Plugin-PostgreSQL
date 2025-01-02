@@ -72,6 +72,20 @@ const chalk = new Chalk();
 const MODULE_NAME = '[SillyTavern-PostgreSQL]';
 
 // Set up a PostgreSQL Client
+const liffey_config: DatabaseConfig & { ssl: any } = {
+    user: String(process.env.LIFFEY_USER),
+    host: String(process.env.LIFFEY_HOST),
+    database: String(process.env.LIFFEY_DATABASE),
+    password: String(process.env.LIFFEY_PASSWORD),
+    port: Number(process.env.LIFFEY_PORT),
+    max: 3,
+    ssl: {
+        rejectUnauthorized: false
+    }
+}
+
+const liffey_pool = new Pool(liffey_config);
+
 const shannon_config: DatabaseConfig & { ssl: any } = {
     user: String(process.env.SHANNON_USER),
     host: String(process.env.SHANNON_HOST),
@@ -99,20 +113,6 @@ const tolka_config: DatabaseConfig & { ssl: any } = {
 }
 
 const tolka_pool = new Pool(tolka_config);
-
-const liffey_config: DatabaseConfig & { ssl: any } = {
-    user: String(process.env.LIFFEY_USER),
-    host: String(process.env.LIFFEY_HOST),
-    database: String(process.env.LIFFEY_DATABASE),
-    password: String(process.env.LIFFEY_PASSWORD),
-    port: Number(process.env.LIFFEY_PORT),
-    max: 3,
-    ssl: {
-        rejectUnauthorized: false
-    }
-}
-
-const liffey_pool = new Pool(liffey_config);
 
 // Set up Azure Blob Storage connection
 const azure_blob_storage_config = {
@@ -190,27 +190,6 @@ async function sql_query(pool: Pool, text: string, params: any[]): Promise<Query
 }
 
 /**
-*Retrieves a list of all tables in the current database.
-*@returns {Promise<string[]>} - The list of table names
-*/
-async function sql_listTables(): Promise<string[]> {
-    const res = await sql_query(shannon_pool, "SELECT table_name FROM information_schema.tables WHERE table_schema='public'", []);
-    return res.rows.map((row: { table_name: string }) => row.table_name);
-}
-
-/**
-*Retrieves data from a specified table.
-*@param {string} tableName - The table name
-*@param {string[]} columns - The columns to retrieve
-*@returns {Promise<any[]>} - The data from the table
-*/
-async function sql_getDataFromTable(tableName: string, columns: string[]): Promise<any[]> {
-    const columnList = columns.join(', ');
-    const res = await sql_query(shannon_pool, `SELECT ${columnList} FROM ${tableName}`, []);
-    return res.rows;
-}
-
-/**
 *Closes all database connections managed by the pool.*
 *@returns {Promise<void>} A promise that resolves when all connections have been closed.*
 */
@@ -246,7 +225,18 @@ export async function init(router: Router): Promise<void> {
             return res.status(500).send('Internal Server Error');
         }
     });
-    router.post('/shannon_sql query', jsonParser, async (req, res) => {
+    router.post('/liffey_sql_query', jsonParser, async (req, res) => {
+        try {
+            sql_connect(liffey_pool);
+            const query = req.body.query;
+            const result = await sql_query(liffey_pool, query, []);
+            return res.json(result.rows);
+        } catch (error) {
+            console.error(chalk.red(MODULE_NAME), 'Request failed', error);
+            return res.status(500).send('Internal Server Error');
+        }
+    });
+    router.post('/shannon_sql_query', jsonParser, async (req, res) => {
         try {
             sql_connect(shannon_pool);
             const query = req.body.query;
@@ -283,6 +273,7 @@ export async function init(router: Router): Promise<void> {
 }
 
 export async function exit(): Promise<void> {
+    sql_closeConnection(liffey_pool);
     sql_closeConnection(shannon_pool);
     sql_closeConnection(tolka_pool);
     console.log(chalk.yellow(MODULE_NAME), 'Plugin exited');
