@@ -2,6 +2,8 @@ import bodyParser from 'body-parser';
 import { Router } from 'express';
 import { Chalk } from 'chalk';
 import { Pool, QueryResult } from 'pg';
+import { BlobServiceClient, StorageSharedKeyCredential, generateBlobSASQueryParameters, BlobSASPermissions, SASProtocol } from "@azure/storage-blob";
+
 
 interface DatabaseConfig {
     user: string;
@@ -24,29 +26,129 @@ interface Plugin {
     info: PluginInfo;
 }
 
+
+const constructBlobUrlWithAccountKey = async (
+    accountName: string,
+    containerName: string,
+    blobName: string,
+    accountKey: string
+): Promise<string> => {
+    const sharedKeyCredential = new StorageSharedKeyCredential(
+        accountName,
+        accountKey
+    );
+
+    const blobServiceClient = new BlobServiceClient(
+        `https://${accountName}.blob.core.windows.net`,
+        sharedKeyCredential
+    );
+
+    const containerClient = blobServiceClient.getContainerClient(containerName);
+    const blobClient = containerClient.getBlobClient(blobName);
+
+    // Generate SAS token with short-lived access
+    const startsOn = new Date();
+    const expiresOn = new Date(startsOn);
+    expiresOn.setMinutes(startsOn.getMinutes() + 15); // 15 minutes validity
+
+    const sasOptions = {
+        containerName,
+        blobName,
+        permissions: BlobSASPermissions.parse("r"), // Read-only
+        startsOn,
+        expiresOn,
+        protocol: SASProtocol.Https
+    };
+
+    const sasToken = generateBlobSASQueryParameters(
+        sasOptions,
+        sharedKeyCredential
+    ).toString();
+
+    return `${blobClient.url}?${sasToken}`;
+};
+
 const chalk = new Chalk();
 const MODULE_NAME = '[SillyTavern-PostgreSQL]';
 
 // Set up a PostgreSQL Client
-const config: DatabaseConfig & { ssl: any } = {
-    user: String(process.env.SQL_USER),
-    host: String(process.env.SQL_HOST),
-    database: String(process.env.SQL_DATABASE),
-    password: String(process.env.SQL_PASSWORD),
-    port: Number(process.env.SQL_PORT),
+const shannon_config: DatabaseConfig & { ssl: any } = {
+    user: String(process.env.SHANNON_USER),
+    host: String(process.env.SHANNON_HOST),
+    database: String(process.env.SHANNON_DATABASE),
+    password: String(process.env.SHANNON_PASSWORD),
+    port: Number(process.env.SHANNON_PORT),
     max: 3,
     ssl: {
         rejectUnauthorized: false
     }
 }
 
-const pool = new Pool(config);
+const shannon_pool = new Pool(shannon_config);
+
+const tolka_config: DatabaseConfig & { ssl: any } = {
+    user: String(process.env.TOLKA_USER),
+    host: String(process.env.TOLKA_HOST),
+    database: String(process.env.TOLKA_DATABASE),
+    password: String(process.env.TOLKA_PASSWORD),
+    port: Number(process.env.TOLKA_PORT),
+    max: 3,
+    ssl: {
+        rejectUnauthorized: false
+    }
+}
+
+const tolka_pool = new Pool(tolka_config);
+
+const liffey_config: DatabaseConfig & { ssl: any } = {
+    user: String(process.env.LIFFEY_USER),
+    host: String(process.env.LIFFEY_HOST),
+    database: String(process.env.LIFFEY_DATABASE),
+    password: String(process.env.LIFFEY_PASSWORD),
+    port: Number(process.env.LIFFEY_PORT),
+    max: 3,
+    ssl: {
+        rejectUnauthorized: false
+    }
+}
+
+const liffey_pool = new Pool(liffey_config);
+
+// Set up Azure Blob Storage connection
+const azure_blob_storage_config = {
+    accountName: String(process.env.BLOB_STORAGE_ACCOUNT_NAME),
+    containerName: String(process.env.BLOB_STORAGE_CONTAINER_NAME),
+    accountKey: String(process.env.BLOB_STORAGE_ACCOUNT_KEY)
+}
+
+type BlobConfig = typeof azure_blob_storage_config;
+type WithBlobName = BlobConfig & { blobName: string };
+
+// Function now accepts the combined config
+const getBlobUrl = async (config: WithBlobName) =>
+    constructBlobUrlWithAccountKey(
+        config.accountName,
+        config.containerName,
+        config.blobName,
+        config.accountKey
+    );
+
+// Usage example
+const downloadBlobNameUrl = async (blobName: string) => {
+    const config: WithBlobName = {
+        ...azure_blob_storage_config,
+        blobName
+    };
+    const securedUrl = await getBlobUrl(config);
+    return securedUrl;
+};
+
 
 /**
 *Connects to the PostgreSQL database.
 *@returns {Promise<void>}
 */
-async function sql_connect(): Promise<void> {
+async function sql_connect(pool: Pool): Promise<void> {
     try {
         const client = await pool.connect();
         console.log('Database connection established');
@@ -69,7 +171,7 @@ async function sql_connect(): Promise<void> {
 *@param {any[]} params - The parameters for the query
 *@returns {Promise<QueryResult>} - The result of the query
 */
-async function sql_query(text: string, params: any[]): Promise<QueryResult> {
+async function sql_query(pool: Pool, text: string, params: any[]): Promise<QueryResult> {
     const client = await pool.connect();
     try {
         console.log(chalk.green(MODULE_NAME), text);
@@ -92,7 +194,7 @@ async function sql_query(text: string, params: any[]): Promise<QueryResult> {
 *@returns {Promise<string[]>} - The list of table names
 */
 async function sql_listTables(): Promise<string[]> {
-    const res = await sql_query("SELECT table_name FROM information_schema.tables WHERE table_schema='public'", []);
+    const res = await sql_query(shannon_pool, "SELECT table_name FROM information_schema.tables WHERE table_schema='public'", []);
     return res.rows.map((row: { table_name: string }) => row.table_name);
 }
 
@@ -104,7 +206,7 @@ async function sql_listTables(): Promise<string[]> {
 */
 async function sql_getDataFromTable(tableName: string, columns: string[]): Promise<any[]> {
     const columnList = columns.join(', ');
-    const res = await sql_query(`SELECT ${columnList} FROM ${tableName}`, []);
+    const res = await sql_query(shannon_pool, `SELECT ${columnList} FROM ${tableName}`, []);
     return res.rows;
 }
 
@@ -112,7 +214,7 @@ async function sql_getDataFromTable(tableName: string, columns: string[]): Promi
 *Closes all database connections managed by the pool.*
 *@returns {Promise<void>} A promise that resolves when all connections have been closed.*
 */
-async function sql_closeConnection(): Promise<void> {
+async function sql_closeConnection(pool: Pool): Promise<void> {
     try {
         await pool.end();
         console.log('All database connections have been closed.');
@@ -135,10 +237,42 @@ export async function init(router: Router): Promise<void> {
     });
     router.post('/sql_query', jsonParser, async (req, res) => {
         try {
-            sql_connect();
+            sql_connect(shannon_pool);
             const query = req.body.query;
-            const result = await sql_query(query, []);
+            const result = await sql_query(shannon_pool, query, []);
             return res.json(result.rows);
+        } catch (error) {
+            console.error(chalk.red(MODULE_NAME), 'Request failed', error);
+            return res.status(500).send('Internal Server Error');
+        }
+    });
+    router.post('/shannon_sql query', jsonParser, async (req, res) => {
+        try {
+            sql_connect(shannon_pool);
+            const query = req.body.query;
+            const result = await sql_query(shannon_pool, query, []);
+            return res.json(result.rows);
+        } catch (error) {
+            console.error(chalk.red(MODULE_NAME), 'Request failed', error);
+            return res.status(500).send('Internal Server Error');
+        }
+    });
+    router.post('/tolka_sql_query', jsonParser, async (req, res) => {
+        try {
+            sql_connect(tolka_pool);
+            const query = req.body.query;
+            const result = await sql_query(tolka_pool, query, []);
+            return res.json(result.rows);
+        } catch (error) {
+            console.error(chalk.red(MODULE_NAME), 'Request failed', error);
+            return res.status(500).send('Internal Server Error');
+        }
+    });
+    router.post('/get_blob_url', jsonParser, async (req, res) => {
+        try {
+            const blobName = req.body.blobName;
+            const result = await downloadBlobNameUrl(blobName);
+            return res.json({ blob_url: result });
         } catch (error) {
             console.error(chalk.red(MODULE_NAME), 'Request failed', error);
             return res.status(500).send('Internal Server Error');
@@ -149,7 +283,8 @@ export async function init(router: Router): Promise<void> {
 }
 
 export async function exit(): Promise<void> {
-    sql_closeConnection();
+    sql_closeConnection(shannon_pool);
+    sql_closeConnection(tolka_pool);
     console.log(chalk.yellow(MODULE_NAME), 'Plugin exited');
 }
 
