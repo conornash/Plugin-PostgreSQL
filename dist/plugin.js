@@ -50476,6 +50476,18 @@ const constructBlobUrlWithAccountKey = (accountName, containerName, blobName, ac
 const chalk = new chalk_1.Chalk();
 const MODULE_NAME = '[SillyTavern-PostgreSQL]';
 // Set up a PostgreSQL Client
+const liffey_config = {
+    user: String(process.env.LIFFEY_USER),
+    host: String(process.env.LIFFEY_HOST),
+    database: String(process.env.LIFFEY_DATABASE),
+    password: String(process.env.LIFFEY_PASSWORD),
+    port: Number(process.env.LIFFEY_PORT),
+    max: 3,
+    ssl: {
+        rejectUnauthorized: false
+    }
+};
+const liffey_pool = new pg_1.Pool(liffey_config);
 const shannon_config = {
     user: String(process.env.SHANNON_USER),
     host: String(process.env.SHANNON_HOST),
@@ -50567,29 +50579,6 @@ function sql_query(pool, text, params) {
     });
 }
 /**
-*Retrieves a list of all tables in the current database.
-*@returns {Promise<string[]>} - The list of table names
-*/
-function sql_listTables() {
-    return __awaiter(this, void 0, void 0, function* () {
-        const res = yield sql_query(shannon_pool, "SELECT table_name FROM information_schema.tables WHERE table_schema='public'", []);
-        return res.rows.map((row) => row.table_name);
-    });
-}
-/**
-*Retrieves data from a specified table.
-*@param {string} tableName - The table name
-*@param {string[]} columns - The columns to retrieve
-*@returns {Promise<any[]>} - The data from the table
-*/
-function sql_getDataFromTable(tableName, columns) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const columnList = columns.join(', ');
-        const res = yield sql_query(shannon_pool, `SELECT ${columnList} FROM ${tableName}`, []);
-        return res.rows;
-    });
-}
-/**
 *Closes all database connections managed by the pool.*
 *@returns {Promise<void>} A promise that resolves when all connections have been closed.*
 */
@@ -50615,6 +50604,7 @@ function init(router) {
         const jsonParser = body_parser_1.default.json();
         // Used to check if the server plugin is running
         router.post('/probe', (_req, res) => {
+            console.log(chalk.green(MODULE_NAME), 'Successful probe');
             return res.sendStatus(204);
         });
         router.post('/sql_query', jsonParser, (req, res) => __awaiter(this, void 0, void 0, function* () {
@@ -50622,6 +50612,42 @@ function init(router) {
                 sql_connect(shannon_pool);
                 const query = req.body.query;
                 const result = yield sql_query(shannon_pool, query, []);
+                return res.json(result.rows);
+            }
+            catch (error) {
+                console.error(chalk.red(MODULE_NAME), 'Request failed', error);
+                return res.status(500).send('Internal Server Error');
+            }
+        }));
+        router.post('/liffey_sql_query', jsonParser, (req, res) => __awaiter(this, void 0, void 0, function* () {
+            try {
+                sql_connect(liffey_pool);
+                const query = req.body.query;
+                const result = yield sql_query(liffey_pool, query, []);
+                return res.json(result.rows);
+            }
+            catch (error) {
+                console.error(chalk.red(MODULE_NAME), 'Request failed', error);
+                return res.status(500).send('Internal Server Error');
+            }
+        }));
+        router.post('/shannon_sql_query', jsonParser, (req, res) => __awaiter(this, void 0, void 0, function* () {
+            try {
+                sql_connect(shannon_pool);
+                const query = req.body.query;
+                const result = yield sql_query(shannon_pool, query, []);
+                return res.json(result.rows);
+            }
+            catch (error) {
+                console.error(chalk.red(MODULE_NAME), 'Request failed', error);
+                return res.status(500).send('Internal Server Error');
+            }
+        }));
+        router.post('/tolka_sql_query', jsonParser, (req, res) => __awaiter(this, void 0, void 0, function* () {
+            try {
+                sql_connect(tolka_pool);
+                const query = req.body.query;
+                const result = yield sql_query(tolka_pool, query, []);
                 return res.json(result.rows);
             }
             catch (error) {
@@ -50646,6 +50672,7 @@ function init(router) {
 exports.init = init;
 function exit() {
     return __awaiter(this, void 0, void 0, function* () {
+        sql_closeConnection(liffey_pool);
         sql_closeConnection(shannon_pool);
         sql_closeConnection(tolka_pool);
         console.log(chalk.yellow(MODULE_NAME), 'Plugin exited');

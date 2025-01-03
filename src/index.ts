@@ -212,6 +212,7 @@ export async function init(router: Router): Promise<void> {
     const jsonParser = bodyParser.json();
     // Used to check if the server plugin is running
     router.post('/probe', (_req, res) => {
+        console.log(chalk.green(MODULE_NAME), 'Successful probe');
         return res.sendStatus(204);
     });
     router.post('/sql_query', jsonParser, async (req, res) => {
