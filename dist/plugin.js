@@ -50535,6 +50535,7 @@ const downloadBlobNameUrl = (blobName) => __awaiter(void 0, void 0, void 0, func
 function sql_connect(pool) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
+            console.log('Establishing database connection...');
             const client = yield pool.connect();
             console.log('Database connection established');
             client.release(); // Release the client back to the pool
@@ -50542,7 +50543,10 @@ function sql_connect(pool) {
         catch (err) {
             const error = err;
             console.error('Database connection error:', error.message, error.stack);
-            if (error.code === 'ETIMEDOUT') {
+            if (error.code === '28P01') {
+                console.log('Incorrect credentials');
+            }
+            else if (error.code === 'ETIMEDOUT') {
                 console.log('Database connection timeout');
             }
             else {

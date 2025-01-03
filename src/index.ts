@@ -150,6 +150,7 @@ const downloadBlobNameUrl = async (blobName: string) => {
 */
 async function sql_connect(pool: Pool): Promise<void> {
     try {
+        console.log('Establishing database connection...');
         const client = await pool.connect();
         console.log('Database connection established');
         client.release();  // Release the client back to the pool
@@ -157,7 +158,9 @@ async function sql_connect(pool: Pool): Promise<void> {
         const error = err as Error & { code?: string };
         console.error('Database connection error:', error.message, error.stack);
 
-        if (error.code === 'ETIMEDOUT') {
+        if (error.code === '28P01') {
+            console.log('Incorrect credentials');
+        } else if (error.code === 'ETIMEDOUT') {
             console.log('Database connection timeout');
         } else {
             throw error;
